@@ -22,7 +22,7 @@ class InventoryData(BaseModel):
 @app.post("/api/calculate")
 def calculate_optimal_route(data: InventoryData):
     # 가격 및 레시피 정의
-    prices = {"아쿠티스": 6707, "광란체": 6804, "깃털": 7011, "코어": 14470, "비약": 14615, "날개": 14819, "파편": 24681, "손": 24969, "척추": 25126, "희석액": 23977}
+    prices = {"아쿠티스": 5159, "광란체": 5234, "깃털": 5393, "코어": 11131, "비약": 11242, "날개": 11399, "파편": 21833, "손": 22088, "척추": 22227, "희석액": 18444}
     finished_goods = list(prices.keys())
     
     recipes = {
