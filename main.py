@@ -82,9 +82,17 @@ def calculate_optimal_route(data: InventoryData):
         c_vars = {i: pulp.LpVariable(f"c_{i}", lowBound=0, cat='Integer') for i in inter_names}
         hc_vars = {i: pulp.LpVariable(f"hc_{i}", lowBound=0, cat='Integer') for i in inter_names if "핵" in i or "결정" in i}
         r_made_vars = {r: pulp.LpVariable(f"rm_{r}", lowBound=0, cat='Integer') for r in refined_names}
+        
+        # [핵심 로직 추가] 1성 정수와 2성 에센스도 무조건 짝수(2배수)로만 생산되도록 제약 변수 선언
+        hr_vars = {r: pulp.LpVariable(f"hr_{r}", lowBound=0, cat='Integer') for r in refined_names if "정수" in r or "에센스" in r}
 
+        # 제약: 조합품(핵/결정) 2배수 생산
         for i in hc_vars:
             model += c_vars[i] == 2 * hc_vars[i]
+            
+        # 제약: 가공품(정수/에센스) 2배수 생산
+        for r in hr_vars:
+            model += r_made_vars[r] == 2 * hr_vars[r]
 
         for i in inter_names:
             demand = pulp.lpSum(recipes[f].get(i, 0) * f_vars[f] for f in finished_goods)
@@ -116,7 +124,6 @@ def calculate_optimal_route(data: InventoryData):
                 total_profit += p
                 sales_by_tier[tier_map[k]] += p
 
-            # 1. 정수/에센스/엘릭서 vs 핵/결정/영약 분할을 위해 딕셔너리 분리
             craft_1_ref = {k:v for k,v in result_r_made.items() if "정수" in k}
             craft_1_inter = {k:v for k,v in result_c.items() if "핵" in k}
             craft_2_ref = {k:v for k,v in result_r_made.items() if "에센스" in k}
@@ -124,29 +131,25 @@ def calculate_optimal_route(data: InventoryData):
             craft_3_ref = {k:v for k,v in result_r_made.items() if "엘릭서" in k}
             craft_3_inter = {k:v for k,v in result_c.items() if "영약" in k}
 
-            # 2. 총 준비물을 1~3성으로 완벽히 그룹핑
             materials_by_tier = {
                 "1": {"raw": {}, "sub": {}},
                 "2": {"raw": {}, "sub": {}},
                 "3": {"raw": {}, "sub": {}}
             }
 
-            # 어패류 그룹핑
             for r_name in refined_names:
                 made = int(r_made_vars[r_name].varValue)
                 if made > 0:
                     raw_id = raw_mapping[r_name]
-                    tier = raw_id[0] # "1", "2", "3" 추출
+                    tier = raw_id[0]
                     materials_by_tier[tier]["raw"][raw_id] = materials_by_tier[tier]["raw"].get(raw_id, 0) + made
 
-            # 부재료 그룹핑을 위한 티어 판별기
             def get_tier(name):
                 if "정수" in name or "핵" in name: return "1"
                 if "에센스" in name or "결정" in name: return "2"
                 if "엘릭서" in name or "영약" in name: return "3"
                 return "1"
 
-            # 부재료 맵핑 로직
             def add_extras_to_tier(item_dict):
                 for item_name, count in item_dict.items():
                     if item_name in extra_reqs:
