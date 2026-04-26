@@ -84,28 +84,44 @@ def calculate_optimal_route(data: InventoryData):
         r_made_vars = {r: pulp.LpVariable(f"rm_{r}", lowBound=0, cat='Integer') for r in refined_names}
         hr_vars = {r: pulp.LpVariable(f"hr_{r}", lowBound=0, cat='Integer') for r in refined_names if "정수" in r or "에센스" in r}
 
+        # [핵심] 실제 추가 재고에서 '빼서 쓴 수량'을 담당하는 변수
+        u_c_vars = {i: pulp.LpVariable(f"uc_{i}", lowBound=0, cat='Integer') for i in inter_names}
+        u_r_vars = {r: pulp.LpVariable(f"ur_{r}", lowBound=0, cat='Integer') for r in refined_names}
+
+        # 제약: 인벤토리 초과 사용 불가
+        for i in inter_names:
+            model += u_c_vars[i] <= data.inter.get(i, 0)
+        for r in refined_names:
+            model += u_r_vars[r] <= data.refined.get(r, 0)
+
+        # 1성 정수, 2성 에센스 짝수 생산 로직
         for i in hc_vars:
             model += c_vars[i] == 2 * hc_vars[i]
-            
         for r in hr_vars:
             model += r_made_vars[r] == 2 * hr_vars[r]
 
-        # 핵심 수정 사항: == (강제 소진) 에서 <= (가용한 범위 내 사용) 으로 변경
+        # [핵심] 새로 만든 수량(c_vars)은 무조건 상위 단계 수요에 100% 흡수되도록 강제(==)
         for i in inter_names:
             demand = pulp.lpSum(recipes[f].get(i, 0) * f_vars[f] for f in finished_goods)
-            model += demand <= c_vars[i] + data.inter.get(i, 0)
+            model += demand == c_vars[i] + u_c_vars[i]
 
         for r in refined_names:
             ref_demand = pulp.lpSum(inter_recipes[i].get(r, 0) * c_vars[i] for i in inter_names)
-            model += ref_demand <= r_made_vars[r] + data.refined.get(r, 0)
+            model += ref_demand == r_made_vars[r] + u_r_vars[r]
+            
+            # 원재료 상한선 제약
             model += r_made_vars[r] <= data.raw.get(raw_mapping[r], 0)
 
         profit = pulp.lpSum(prices[f] * f_vars[f] for f in finished_goods)
+        
+        # [꼼수] 원재료로 만든 물품에 미세한 가산점(0.001) 부여하여, 창고 재고보다 원재료를 우선 태우도록 유도
+        craft_bonus = pulp.lpSum(r_made_vars[r] * 0.001 for r in refined_names) + pulp.lpSum(c_vars[i] * 0.001 for i in inter_names)
+
         if mode == "profit":
-            model += profit
+            model += profit + craft_bonus
         else:
             total_raw_used = pulp.lpSum(r_made_vars[r] for r in refined_names)
-            model += total_raw_used * 1000000 + profit
+            model += total_raw_used * 1000000 + profit + craft_bonus
 
         model.solve(pulp.PULP_CBC_CMD(msg=False))
 
