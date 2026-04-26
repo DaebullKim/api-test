@@ -68,8 +68,12 @@ def calculate_optimal_route(data: InventoryData):
         "물결 수호의 핵": {"깐 새우": 1}, "파동 오염의 핵": {"도미 회": 1}, "질서 파괴의 핵": {"청어 회": 1}, "활력 붕괴의 핵": {"금붕어 회": 1}, "침식 방어의 핵": {"농어 회": 1},
         "수호 에센스": {"해초": 3, "참나무 잎": 3}, "파동 에센스": {"해초": 3, "가문비나무 잎": 3}, "혼란 에센스": {"해초": 3, "자작나무 잎": 3}, "생명 에센스": {"해초": 3, "벚나무 잎": 3}, "부식 에센스": {"해초": 3, "짙은 참나무 잎": 3},
         "활기 보존의 결정": {"켈프": 8, "청금석 블록": 1}, "파도 침식의 결정": {"켈프": 8, "레드스톤 블록": 1}, "방어 오염의 결정": {"켈프": 8, "철 주괴": 3}, "격류 재생의 결정": {"켈프": 8, "금 주괴": 2}, "맹독 혼란의 결정": {"켈프": 8, "다이아몬드": 1},
-        "수호의 엘릭서": {"불우렁쉥이": 2, "유리병": 3, "네더랙": 8}, "파동의 엘릭서": {"불우렁쉥이": 2, "유리병": 3, "마그마 블록": 4}, "혼란의 엘릭서": {"불우렁쉥이": 2, "유리병": 3, "영혼 흙": 4}, "생명의 엘릭서": {"불우렁쉥이": 2, "유리병": 3, "진홍빛 자루": 4}, "부식의 엘릭서": {"불우렁쉥이": 2, "유리병": 3, "뒤틀린 자루": 4},
-        "불멸 재생의 영약": {"말린 켈프": 12, "발광 열매": 4, "죽은 관 산호 블록": 2}, "파동 장벽의 영약": {"말린 켈프": 12, "발광 열매": 4, "죽은 사방산호 블록": 2}, "타락 침식의 영약": {"말린 켈프": 12, "발광 열매": 4, "죽은 거품 산호 블록": 2}, "생명 광란의 영약": {"말린 켈프": 12, "발광 열매": 4, "죽은 불 산호 블록": 2}, "맹독 파동의 영약": {"말린 켈프": 12, "발광 열매": 4, "죽은 뇌 산호 블록": 2}
+        # 3성 영약 재료 '말린 켈프' -> '켈프'로 통일
+        "불멸 재생의 영약": {"켈프": 12, "발광 열매": 4, "죽은 관 산호 블록": 2}, 
+        "파동 장벽의 영약": {"켈프": 12, "발광 열매": 4, "죽은 사방산호 블록": 2}, 
+        "타락 침식의 영약": {"켈프": 12, "발광 열매": 4, "죽은 거품 산호 블록": 2}, 
+        "생명 광란의 영약": {"켈프": 12, "발광 열매": 4, "죽은 불 산호 블록": 2}, 
+        "맹독 파동의 영약": {"켈프": 12, "발광 열매": 4, "죽은 뇌 산호 블록": 2}
     }
     
     inter_names = list(inter_recipes.keys())
@@ -84,23 +88,19 @@ def calculate_optimal_route(data: InventoryData):
         r_made_vars = {r: pulp.LpVariable(f"rm_{r}", lowBound=0, cat='Integer') for r in refined_names}
         hr_vars = {r: pulp.LpVariable(f"hr_{r}", lowBound=0, cat='Integer') for r in refined_names if "정수" in r or "에센스" in r}
 
-        # [핵심] 실제 추가 재고에서 '빼서 쓴 수량'을 담당하는 변수
         u_c_vars = {i: pulp.LpVariable(f"uc_{i}", lowBound=0, cat='Integer') for i in inter_names}
         u_r_vars = {r: pulp.LpVariable(f"ur_{r}", lowBound=0, cat='Integer') for r in refined_names}
 
-        # 제약: 인벤토리 초과 사용 불가
         for i in inter_names:
             model += u_c_vars[i] <= data.inter.get(i, 0)
         for r in refined_names:
             model += u_r_vars[r] <= data.refined.get(r, 0)
 
-        # 1성 정수, 2성 에센스 짝수 생산 로직
         for i in hc_vars:
             model += c_vars[i] == 2 * hc_vars[i]
         for r in hr_vars:
             model += r_made_vars[r] == 2 * hr_vars[r]
 
-        # [핵심] 새로 만든 수량(c_vars)은 무조건 상위 단계 수요에 100% 흡수되도록 강제(==)
         for i in inter_names:
             demand = pulp.lpSum(recipes[f].get(i, 0) * f_vars[f] for f in finished_goods)
             model += demand == c_vars[i] + u_c_vars[i]
@@ -108,13 +108,10 @@ def calculate_optimal_route(data: InventoryData):
         for r in refined_names:
             ref_demand = pulp.lpSum(inter_recipes[i].get(r, 0) * c_vars[i] for i in inter_names)
             model += ref_demand == r_made_vars[r] + u_r_vars[r]
-            
-            # 원재료 상한선 제약
             model += r_made_vars[r] <= data.raw.get(raw_mapping[r], 0)
 
         profit = pulp.lpSum(prices[f] * f_vars[f] for f in finished_goods)
         
-        # [꼼수] 원재료로 만든 물품에 미세한 가산점(0.001) 부여하여, 창고 재고보다 원재료를 우선 태우도록 유도
         craft_bonus = pulp.lpSum(r_made_vars[r] * 0.001 for r in refined_names) + pulp.lpSum(c_vars[i] * 0.001 for i in inter_names)
 
         if mode == "profit":
