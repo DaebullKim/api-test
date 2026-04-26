@@ -82,25 +82,22 @@ def calculate_optimal_route(data: InventoryData):
         c_vars = {i: pulp.LpVariable(f"c_{i}", lowBound=0, cat='Integer') for i in inter_names}
         hc_vars = {i: pulp.LpVariable(f"hc_{i}", lowBound=0, cat='Integer') for i in inter_names if "핵" in i or "결정" in i}
         r_made_vars = {r: pulp.LpVariable(f"rm_{r}", lowBound=0, cat='Integer') for r in refined_names}
-        
-        # [핵심 로직 추가] 1성 정수와 2성 에센스도 무조건 짝수(2배수)로만 생산되도록 제약 변수 선언
         hr_vars = {r: pulp.LpVariable(f"hr_{r}", lowBound=0, cat='Integer') for r in refined_names if "정수" in r or "에센스" in r}
 
-        # 제약: 조합품(핵/결정) 2배수 생산
         for i in hc_vars:
             model += c_vars[i] == 2 * hc_vars[i]
             
-        # 제약: 가공품(정수/에센스) 2배수 생산
         for r in hr_vars:
             model += r_made_vars[r] == 2 * hr_vars[r]
 
+        # 핵심 수정 사항: == (강제 소진) 에서 <= (가용한 범위 내 사용) 으로 변경
         for i in inter_names:
             demand = pulp.lpSum(recipes[f].get(i, 0) * f_vars[f] for f in finished_goods)
-            model += demand == c_vars[i] + data.inter.get(i, 0)
+            model += demand <= c_vars[i] + data.inter.get(i, 0)
 
         for r in refined_names:
             ref_demand = pulp.lpSum(inter_recipes[i].get(r, 0) * c_vars[i] for i in inter_names)
-            model += ref_demand == r_made_vars[r] + data.refined.get(r, 0)
+            model += ref_demand <= r_made_vars[r] + data.refined.get(r, 0)
             model += r_made_vars[r] <= data.raw.get(raw_mapping[r], 0)
 
         profit = pulp.lpSum(prices[f] * f_vars[f] for f in finished_goods)
